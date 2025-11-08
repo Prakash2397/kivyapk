@@ -1,0 +1,93 @@
+#:kivy 2.0.0
+#:import hex kivy.utils.get_color_from_hex
+
+MDScreen:
+    md_bg_color: hex("#f5f5f5")
+    
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "40dp"
+        spacing: "30dp"
+        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+        
+        # Header
+        MDBoxLayout:
+            orientation: "vertical"
+            size_hint_y: None
+            height: self.minimum_height
+            spacing: "10dp"
+            
+            MDLabel:
+                text: "Welcome to KivyMD!"
+                font_style: "H4"
+                halign: "center"
+                size_hint_y: None
+                height: self.texture_size[1]
+                theme_text_color: "Primary"
+            
+            MDLabel:
+                text: "A simple demo app"
+                font_style: "Subtitle1"
+                halign: "center"
+                size_hint_y: None
+                height: self.texture_size[1]
+                theme_text_color: "Secondary"
+        
+        # Input Section
+        MDBoxLayout:
+            orientation: "vertical"
+            size_hint_y: None
+            height: "120dp"
+            spacing: "20dp"
+            
+            MDTextField:
+                id: name_input
+                hint_text: "Enter your name"
+                mode: "rectangle"
+                size_hint_y: None
+                height: "50dp"
+                icon_left: "account"
+                helper_text: "Type your name here"
+                helper_text_mode: "on_focus"
+            
+            MDLabel:
+                id: greeting_label
+                text: "Enter your name above!"
+                halign: "center"
+                font_style: "H6"
+                theme_text_color: "Primary"
+                size_hint_y: None
+                height: self.texture_size[1]
+        
+        # Buttons Section
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: "50dp"
+            spacing: "20dp"
+            pos_hint: {"center_x": 0.5}
+            
+            MDRaisedButton:
+                text: "Greet Me"
+                icon: "hand-wave"
+                on_release: app.on_button_click()
+            
+            MDRaisedButton:
+                text: "Clear"
+                icon: "refresh"
+                on_release: app.clear_text()
+        
+        # Info Button
+        MDBoxLayout:
+            size_hint_y: None
+            height: "40dp"
+            pos_hint: {"center_x": 0.5}
+            
+            MDRaisedButton:
+                text: "App Info"
+                icon: "information"
+                size_hint: None, None
+                height: "40dp"
+                width: "150dp"
+                elevation: 2
+                on_release: app.show_info()
