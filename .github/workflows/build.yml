@@ -1,3 +1,6 @@
+# Sample repository at https://github.com/Novfensec/SAMPLE-KIVYMD-APP
+# Tic Tac Toe Game at https://github.com/Novfensec/Tic-Tac-Toe-Android
+
 name: Android Build
 
 on:
@@ -29,6 +32,7 @@ jobs:
           key: buildozer-global-${{ runner.os }}-${{ steps.get-date.outputs.date }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             buildozer-global-${{ runner.os }}-
+
       - name: Cache Buildozer directory in app
         uses: actions/cache@v4
         with:
@@ -36,6 +40,7 @@ jobs:
           key: ${{ runner.os }}-buildozer-${{ github.run_id }}-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
             ${{ runner.os }}-buildozer-
+
       - name: Cache Android SDK
         uses: actions/cache@v4
         with:
@@ -43,6 +48,7 @@ jobs:
           key: ${{ runner.os }}-android-sdk-${{ steps.get-date.outputs.date }}
           restore-keys: |
             ${{ runner.os }}-android-sdk-
+
       - name: Cache Android NDK
         uses: actions/cache@v4
         with:
@@ -50,6 +56,7 @@ jobs:
           key: ${{ runner.os }}-android-ndk-${{ steps.get-date.outputs.date }}
           restore-keys: |
             ${{ runner.os }}-android-ndk-
+
       # Install dependencies
       - name: Install dependencies
         run: |
@@ -96,6 +103,7 @@ jobs:
             libffi-dev \
             libssl-dev \
             automake
+
       # Set up Java 17 required by Gradle
       - name: Setup Java 17 required by Gradle
         uses: actions/setup-java@v4
@@ -107,13 +115,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9' #set your python version
+          python-version: '3.10.11' #set your python version
 
       # Install pip dependencies
       - name: Install pip dependencies
         run: |
           pip install --upgrade pip
           pip install buildozer cython==0.29.33 git+https://github.com/kivy/plyer.git
+
       # Build with Buildozer
       - name: Build with Buildozer
         id: buildozer
@@ -130,4 +139,4 @@ jobs:
           path: |
             bin/*.apk
             bin/*.aab
-          
+          retention-days: 3
