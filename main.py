@@ -1,108 +1,153 @@
 from kivy.lang import Builder
 from kivymd.app import MDApp
-from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.button import MDRaisedButton
-from kivymd.uix.label import MDLabel
-from kivymd.uix.textfield import MDTextField
-from kivymd.uix.dialog import MDDialog
-from kivymd.uix.button import MDFlatButton
+from kivy.utils import platform
 import os
 
-class MainApp(MDApp):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.dialog = None
+# Embed KV directly in the code - DON'T use external files on Android
+KV = '''
+MDScreen:
+    md_bg_color: 0.95, 0.95, 0.95, 1
     
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: "40dp"
+        spacing: "20dp"
+        pos_hint: {"center_x": 0.5, "center_y": 0.5}
+        
+        MDLabel:
+            text: "Welcome to KivyMD!"
+            halign: "center"
+            font_style: "H4"
+            theme_text_color: "Primary"
+            size_hint_y: None
+            height: self.texture_size[1]
+        
+        MDTextField:
+            id: name_input
+            hint_text: "Enter your name"
+            size_hint_y: None
+            height: "50dp"
+            icon_left: "account"
+        
+        MDBoxLayout:
+            orientation: "horizontal"
+            spacing: "10dp"
+            size_hint_y: None
+            height: "50dp"
+            pos_hint: {"center_x": 0.5}
+            
+            MDRaisedButton:
+                text: "Greet Me"
+                on_release: app.on_button_click()
+            
+            MDRaisedButton:
+                text: "Clear"
+                on_release: app.clear_text()
+        
+        MDLabel:
+            id: greeting_label
+            text: "Enter your name above!"
+            halign: "center"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: self.texture_size[1]
+        
+        MDRaisedButton:
+            text: "App Info"
+            size_hint_x: 0.5
+            pos_hint: {"center_x": 0.5}
+            on_release: app.show_info()
+'''
+
+class MainApp(MDApp):
     def build(self):
-        # Set theme
+        # Set theme before loading KV
         self.theme_cls.theme_style = "Light"
         self.theme_cls.primary_palette = "Blue"
         
-        # Check if KV file exists
-        if not os.path.exists("main.kv"):
-            print("ERROR: main.kv file not found!")
-            return self.create_fallback_ui()
-        
+        # Load embedded KV string - NEVER use external files on Android
         try:
-            # Load KV file
-            return Builder.load_file("main.kv")
+            return Builder.load_string(KV)
         except Exception as e:
-            print(f"Error loading KV file: {e}")
-            return self.create_fallback_ui()
+            # If KivyMD fails, fall back to basic Kivy
+            return self.create_basic_fallback_ui()
     
-    def create_fallback_ui(self):
-        """Create UI programmatically if KV file fails"""
-        layout = MDBoxLayout(
-            orientation="vertical",
-            padding=40,
-            spacing=30,
-            pos_hint={"center_x": 0.5, "center_y": 0.5}
-        )
+    def create_basic_fallback_ui(self):
+        """Create basic UI without KivyMD if it fails"""
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.label import Label
+        from kivy.uix.textinput import TextInput
+        from kivy.uix.button import Button
         
-        # Add widgets programmatically
-        title = MDLabel(
-            text="Welcome to KivyMD!",
-            halign="center",
-            font_style="H4",
-            theme_text_color="Primary"
-        )
+        layout = BoxLayout(orientation='vertical', padding=40, spacing=20)
+        
+        title = Label(text='Welcome!', font_size=24)
         layout.add_widget(title)
         
+        self.name_input = TextInput(hint_text='Enter your name', size_hint_y=None, height=50)
+        layout.add_widget(self.name_input)
+        
+        button = Button(text='Greet Me', size_hint_y=None, height=50)
+        button.bind(on_press=self.basic_button_click)
+        layout.add_widget(button)
+        
+        self.greeting_label = Label(text='Enter your name above!')
+        layout.add_widget(self.greeting_label)
+        
         return layout
+    
+    def basic_button_click(self, instance):
+        """Button handler for basic fallback UI"""
+        name = self.name_input.text.strip()
+        if name:
+            self.greeting_label.text = f"Hello, {name}! 👋"
+        else:
+            self.greeting_label.text = "Please enter your name!"
     
     def on_button_click(self):
         """Handle button click event"""
         try:
             name = self.root.ids.name_input.text.strip()
-            
             if name:
                 self.root.ids.greeting_label.text = f"Hello, {name}! 👋"
             else:
                 self.root.ids.greeting_label.text = "Please enter your name!"
-        except AttributeError as e:
-            print(f"Widgets not found: {e}")
-            self.show_alert_dialog("Error", "UI not loaded properly!")
-    
-    def show_info(self):
-        """Show information dialog"""
-        if not self.dialog:
-            self.dialog = MDDialog(
-                title="App Info",
-                text="This is a simple KivyMD app with KV language!\n\nFeatures:\n• Material Design\n• Clean UI\n• Easy to extend",
-                buttons=[
-                    MDFlatButton(
-                        text="OK",
-                        theme_text_color="Custom",
-                        text_color=self.theme_cls.primary_color,
-                        on_release=lambda x: self.dialog.dismiss()
-                    ),
-                ],
-            )
-        self.dialog.open()
-    
-    def show_alert_dialog(self, title, text):
-        """Show alert dialog"""
-        dialog = MDDialog(
-            title=title,
-            text=text,
-            buttons=[
-                MDFlatButton(
-                    text="OK",
-                    theme_text_color="Custom",
-                    text_color=self.theme_cls.primary_color,
-                    on_release=lambda x: dialog.dismiss()
-                ),
-            ],
-        )
-        dialog.open()
+        except Exception as e:
+            # If KivyMD widgets fail, show basic message
+            self.show_basic_alert("Please enter a name")
     
     def clear_text(self):
         """Clear the text input and greeting"""
         try:
             self.root.ids.name_input.text = ""
             self.root.ids.greeting_label.text = "Enter your name above!"
-        except AttributeError:
-            self.show_alert_dialog("Error", "UI not loaded properly!")
+        except:
+            pass
+    
+    def show_info(self):
+        """Show information - simplified for Android"""
+        self.show_basic_alert("This is a simple KivyMD app for Android!")
+    
+    def show_basic_alert(self, message):
+        """Show basic alert without dialogs"""
+        try:
+            from kivymd.uix.dialog import MDDialog
+            from kivymd.uix.button import MDFlatButton
+            
+            dialog = MDDialog(
+                title="Info",
+                text=message,
+                buttons=[
+                    MDFlatButton(
+                        text="OK",
+                        on_release=lambda x: dialog.dismiss()
+                    ),
+                ],
+            )
+            dialog.open()
+        except:
+            # If dialogs fail, just update the label
+            self.root.ids.greeting_label.text = message
 
 if __name__ == "__main__":
     MainApp().run()
