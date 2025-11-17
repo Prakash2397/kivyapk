@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 KivyMD YouTube Downloader – Android + Desktop – Nov 2025
-Single file, fully working folder picker on Android
+Single file, default folder = “YouTube Downloads”
 """
 import os
 import re
@@ -19,7 +19,6 @@ from kivymd.app import MDApp
 from kivymd.uix.filemanager import MDFileManager
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.list import OneLineListItem
-
 import yt_dlp
 
 # ----------------------------------------------------------------------
@@ -30,95 +29,76 @@ BoxLayout:
     orientation: "vertical"
     padding: dp(12)
     spacing: dp(10)
-
     MDCard:
         size_hint_y: None
         height: dp(180)
         elevation: 6
         padding: dp(12)
         radius: [dp(12)]
-
         BoxLayout:
             orientation: "vertical"
             spacing: dp(8)
-
             MDTextField:
                 id: url_field
                 hint_text: "YouTube URL"
                 required: True
-
             BoxLayout:
                 size_hint_y: None
                 height: dp(40)
                 spacing: dp(8)
-
                 MDLabel:
                     text: "Folder:"
                     size_hint_x: None
                     width: dp(60)
-
                 MDLabel:
                     id: folder_label
                     text: app.download_folder or "No folder selected"
                     theme_text_color: "Secondary"
                     shorten: True
-
                 MDFillRoundFlatIconButton:
                     text: "Choose"
                     icon: "folder"
                     size_hint_x: None
                     width: dp(120)
                     on_release: app.open_file_manager()
-
             BoxLayout:
                 size_hint_y: None
                 height: dp(48)
                 spacing: dp(8)
-
                 MDRaisedButton:
                     text: "Download"
                     on_release: app.start_download()
-
                 MDFlatButton:
                     text: "Clear"
                     on_release: app.clear_inputs()
-
     MDProgressBar:
         id: progress
         value: app.progress
-
     MDCard:
         size_hint_y: None
         height: dp(180)
         elevation: 4
         padding: dp(8)
-
         BoxLayout:
             orientation: "vertical"
             spacing: dp(6)
-
             MDLabel:
                 text: "Status"
                 font_style: "Subtitle1"
-
             MDLabel:
                 id: status_label
                 text: app.status_text
                 theme_text_color: "Secondary"
-
     MDCard:
         size_hint_y: None
         height: dp(180)
         elevation: 4
         padding: dp(8)
-
         BoxLayout:
             orientation: "vertical"
-
             MDLabel:
                 text: "Recent Downloads"
                 font_style: "Subtitle1"
-
             ScrollView:
                 MDList:
                     id: recent_list
@@ -133,33 +113,24 @@ def fix_shorts_url(url: str) -> str:
         return f"https://www.youtube.com/watch?v={m.group(1)}"
     return url
 
-
 # ----------------------------------------------------------------------
 # Android SAF (Storage Access Framework) helper
 # ----------------------------------------------------------------------
 class AndroidSAF:
-    """Small wrapper to write files via a persisted URI."""
     def __init__(self, uri_str: str):
         from jnius import autoclass
         self.Uri = autoclass('android.net.Uri')
         self.DocumentsContract = autoclass('android.provider.DocumentsContract')
         self.ContentResolver = autoclass('android.content.ContentResolver')
         self.PythonActivity = autoclass('org.kivy.android.PythonActivity')
-
         self.uri = self.Uri.parse(uri_str)
         self.cr = self.PythonActivity.mActivity.getContentResolver()
 
     def create_file(self, display_name: str, mime: str = "video/mp4"):
-        """Create a new file inside the selected tree and return its URI."""
-        doc_uri = self.DocumentsContract.createDocument(
-            self.cr, self.uri, mime, display_name
-        )
-        return doc_uri
+        return self.DocumentsContract.createDocument(self.cr, self.uri, mime, display_name)
 
     def open_output_stream(self, file_uri):
-        """Return a file descriptor that yt-dlp can write to."""
         return self.cr.openOutputStream(file_uri)
-
 
 # ----------------------------------------------------------------------
 # App
@@ -174,15 +145,49 @@ class YouTubeDownloaderApp(MDApp):
     _saf = None          # AndroidSAF instance
     _folder_uri = None   # persisted URI string
 
+    # ------------------------------------------------------------------
+    # Default folder name
+    # ------------------------------------------------------------------
+    DEFAULT_FOLDER_NAME = "YouTube Downloads"
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.file_manager = None
         self.store = JsonStore("ytdl_store.json")
+
+        # Load persisted recent list
         if self.store.exists("recent"):
             self.recent = self.store.get("recent")["items"]
+
+        # Load persisted folder (if any)
         if self.store.exists("folder_uri"):
             self._folder_uri = self.store.get("folder_uri")["uri"]
             self.download_folder = self.store.get("folder_uri")["name"]
+
+        # --------------------------------------------------------------
+        # 1. If we have a persisted SAF folder → use it (Android)
+        # 2. Else create the default folder automatically
+        # --------------------------------------------------------------
+        if platform == 'android' and self._folder_uri:
+            self._saf = AndroidSAF(self._folder_uri)
+
+        elif not self.download_folder:
+            self._set_default_folder()
+
+    # ------------------------------------------------------------------
+    # Set (and create) the default folder
+    # ------------------------------------------------------------------
+    def _set_default_folder(self):
+        if platform == 'android':
+            # On Android we **cannot** create a folder without user consent.
+            # We simply leave it empty and force the user to pick one.
+            self.download_folder = ""
+        else:
+            # Desktop – create ~/YouTube Downloads
+            default_path = os.path.join(os.path.expanduser("~"), self.DEFAULT_FOLDER_NAME)
+            os.makedirs(default_path, exist_ok=True)
+            self.download_folder = default_path
+            self.root.ids.folder_label.text = default_path
 
     # ------------------------------------------------------------------
     # Android activity result (folder picker)
@@ -190,11 +195,9 @@ class YouTubeDownloaderApp(MDApp):
     def on_activity_result(self, request_code, result_code, intent):
         if request_code != 1001:
             return
-        # RESULT_OK = -1
-        if result_code != -1:
+        if result_code != -1:                     # RESULT_OK = -1
             self._show_dialog("Folder selection cancelled.")
             return
-
         try:
             from jnius import autoclass
             Uri = autoclass('android.net.Uri')
@@ -203,24 +206,19 @@ class YouTubeDownloaderApp(MDApp):
 
             uri = intent.getData()
             cr = PythonActivity.mActivity.getContentResolver()
-            # Persist permissions
             cr.takePersistableUriPermission(
                 uri,
                 autoclass('android.content.Intent').FLAG_GRANT_READ_URI_PERMISSION |
                 autoclass('android.content.Intent').FLAG_GRANT_WRITE_URI_PERMISSION
             )
-
             doc_file = DocumentFile.fromTreeUri(PythonActivity.mActivity, uri)
             name = doc_file.getName() or "Selected Folder"
 
-            # Store for later runs
             self._folder_uri = uri.toString()
             self.store.put("folder_uri", uri=self._folder_uri, name=name)
-
             self.download_folder = name
             self.root.ids.folder_label.text = name
             self._saf = AndroidSAF(self._folder_uri)
-
             self._show_dialog(f"Folder selected: {name}")
         except Exception as e:
             self._show_dialog(f"Error: {str(e)}")
@@ -235,7 +233,7 @@ class YouTubeDownloaderApp(MDApp):
 
     def _post_build(self, dt):
         self._populate_recent()
-        # If we already have a persisted folder, show it
+        # Show the default folder (desktop) or persisted one (Android)
         if self.download_folder:
             self.root.ids.folder_label.text = self.download_folder
 
@@ -260,12 +258,15 @@ class YouTubeDownloaderApp(MDApp):
             self._desktop_file_manager()
 
     def _android_folder_picker(self):
+        if platform != 'android':
+            return
         try:
             from jnius import autoclass
             from android.runnable import run_on_ui_thread
 
             Intent = autoclass('android.content.Intent')
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            app = self
 
             @run_on_ui_thread
             def start_picker():
@@ -275,11 +276,21 @@ class YouTubeDownloaderApp(MDApp):
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
                 )
-                PythonActivity.mActivity.startActivityForResult(intent, 1001)
+                activity = PythonActivity.mActivity
+                activity.startActivityForResult(intent, 1001)
+
+                if not hasattr(activity, 'ytdl_result_listener_set'):
+                    activity.ytdl_result_listener_set = True
+
+                    def result_handler(req_code, res_code, data):
+                        if req_code == 1001:
+                            app.on_activity_result(req_code, res_code, data)
+
+                    activity.setResultListener(result_handler)
 
             start_picker()
         except Exception as e:
-            self._show_dialog(f"Picker error: {e}")
+            self._show_dialog(f"Error opening picker: {e}")
 
     def _desktop_file_manager(self):
         if not self.file_manager:
@@ -316,7 +327,6 @@ class YouTubeDownloaderApp(MDApp):
             return self._show_dialog("Please choose a folder first.")
         if platform != 'android' and not self.download_folder:
             return self._show_dialog("Please choose a folder first.")
-
         threading.Thread(target=self._download_thread, args=(url,), daemon=True).start()
 
     def _download_thread(self, raw_url: str):
@@ -324,9 +334,6 @@ class YouTubeDownloaderApp(MDApp):
         self._set_status("Preparing…")
         url = fix_shorts_url(raw_url)
 
-        # ------------------------------------------------------------------
-        # Build yt-dlp options
-        # ------------------------------------------------------------------
         ydl_opts = {
             "format": "best[ext=mp4]/best",
             "noplaylist": True,
@@ -338,70 +345,49 @@ class YouTubeDownloaderApp(MDApp):
         }
 
         if platform == 'android':
-            # ---- Android: use SAF to write directly into the chosen folder ----
+            # ---- Android: SAF -------------------------------------------------
             info = yt_dlp.YoutubeDL({"quiet": True}).extract_info(url, download=False)
             title = info.get("title", "video")
             ext = info.get("ext", "mp4")
             safe_name = "".join(c if c not in r'\/:*?"<>|' else "_" for c in title)
             filename = f"{safe_name}.{ext}"
 
-            # Create file inside the selected tree
             file_uri = self._saf.create_file(filename)
             if not file_uri:
                 self._set_status("Failed to create file in folder")
                 return
 
-            # Custom output template that writes via SAF
             class SAFOutput:
                 def __init__(self, saf, uri):
                     self.saf = saf
                     self.uri = uri
-
-                def write(self, data):
-                    os.write(self.fd, data)
-
-                def close(self):
-                    os.close(self.fd)
-
                 def __enter__(self):
                     self.fd = os.dup(self.saf.open_output_stream(self.uri).detachFd())
                     return self
-
                 def __exit__(self, *args):
-                    self.close()
+                    os.close(self.fd)
 
-            # Tell yt-dlp to write to a file object
-            ydl_opts["outtmpl"] = {"default": filename}   # just for info dict
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegVideoConvertor",
-                "preferedformat": "mp4",
-            }]
-
-            # Hook to replace the file path with our SAF stream
             def _my_hook(d):
                 if d["status"] == "downloading":
                     self._progress_hook(d)
                 elif d["status"] == "finished":
-                    # yt-dlp finished downloading to a temporary file
                     tmp_path = d["filepath"]
-                    # copy tmp → SAF
                     with open(tmp_path, "rb") as src, SAFOutput(self._saf, file_uri) as dst:
                         while True:
                             chunk = src.read(1024 * 1024)
                             if not chunk:
                                 break
-                            dst.write(chunk)
-                    os.unlink(tmp_path)   # clean up
+                            os.write(dst.fd, chunk)
+                    os.unlink(tmp_path)
                     self._progress_hook({"status": "finished"})
 
             ydl_opts["progress_hooks"] = [_my_hook]
-
             self._set_status(f"Downloading: {title}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
         else:
-            # ---- Desktop: normal path ----
+            # ---- Desktop ----------------------------------------------------
             outtmpl = os.path.join(self.download_folder, "%(title)s.%(ext)s")
             ydl_opts["outtmpl"] = outtmpl
             try:
@@ -419,7 +405,7 @@ class YouTubeDownloaderApp(MDApp):
         self.progress = 100
 
     # ------------------------------------------------------------------
-    # Progress hook (common for both platforms)
+    # Progress hook
     # ------------------------------------------------------------------
     def _progress_hook(self, d):
         if d["status"] == "downloading":
@@ -452,7 +438,6 @@ class YouTubeDownloaderApp(MDApp):
     # ------------------------------------------------------------------
     def _show_dialog(self, txt: str):
         MDDialog(title="Notice", text=txt, size_hint=(0.8, None)).open()
-
 
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
