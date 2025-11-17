@@ -9,7 +9,8 @@
 title = multiyoutube
 
 # (str) Package name
-package.name = youtubevideodownloader1
+package.name = multiyoutube 
+#youtubevideodownloader1
 
 
 # (str) Package domain (needed for android/ios packaging)
