@@ -2,7 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 KivyMD YouTube Downloader – Android (internal shared storage) + Desktop – Nov 2025
-Single file, default folder = “YouTube Downloads”
+Features:
+ • Default folder: /storage/emulated/0/Download/YouTube Downloads
+ • Full path shown in label
+ • Multi‑quality selector (dropdown)
+ • Progress bar with percentage text
 """
 import os
 import re
@@ -18,6 +22,7 @@ from kivymd.app import MDApp
 from kivymd.uix.filemanager import MDFileManager
 from kivymd.uix.dialog import MDDialog
 from kivymd.uix.list import OneLineListItem
+from kivymd.uix.menu import MDDropdownMenu
 import yt_dlp
 
 # ----------------------------------------------------------------------
@@ -28,77 +33,124 @@ BoxLayout:
     orientation: "vertical"
     padding: dp(12)
     spacing: dp(10)
+
     MDCard:
         size_hint_y: None
-        height: dp(180)
+        height: dp(230)
         elevation: 6
         padding: dp(12)
         radius: [dp(12)]
+
         BoxLayout:
             orientation: "vertical"
             spacing: dp(8)
+
             MDTextField:
                 id: url_field
                 hint_text: "YouTube URL"
                 required: True
+
             BoxLayout:
                 size_hint_y: None
                 height: dp(40)
                 spacing: dp(8)
+
                 MDLabel:
                     text: "Folder:"
                     size_hint_x: None
                     width: dp(60)
+
                 MDLabel:
                     id: folder_label
                     text: app.download_folder or "No folder selected"
                     theme_text_color: "Secondary"
                     shorten: True
                     shorten_from: "right"
+
                 MDFillRoundFlatIconButton:
                     text: "Choose"
                     icon: "folder"
                     size_hint_x: None
                     width: dp(120)
                     on_release: app.open_file_manager()
+
             BoxLayout:
                 size_hint_y: None
                 height: dp(48)
                 spacing: dp(8)
+
+                MDRaisedButton:
+                    text: "Load Formats"
+                    on_release: app.load_formats()
+
+                MDFlatButton:
+                    id: quality_btn
+                    text: "Quality"
+                    disabled: True
+                    on_release: app.quality_menu.open()
+
                 MDRaisedButton:
                     text: "Download"
                     on_release: app.start_download()
+
                 MDFlatButton:
                     text: "Clear"
                     on_release: app.clear_inputs()
-    MDProgressBar:
-        id: progress
-        value: app.progress
+
+    MDCard:
+        size_hint_y: None
+        height: dp(60)
+        elevation: 4
+        padding: dp(8)
+
+        MDBoxLayout:
+            orientation: "horizontal"
+            adaptive_height: True
+            spacing: dp(8)
+
+            MDProgressBar:
+                id: progress
+                value: app.progress
+                size_hint_x: 0.8
+
+            MDLabel:
+                id: percent_label
+                text: f"{int(app.progress)} %"
+                halign: "center"
+                size_hint_x: 0.2
+
     MDCard:
         size_hint_y: None
         height: dp(180)
         elevation: 4
         padding: dp(8)
+
         BoxLayout:
             orientation: "vertical"
             spacing: dp(6)
+
             MDLabel:
                 text: "Status"
                 font_style: "Subtitle1"
+
             MDLabel:
                 id: status_label
                 text: app.status_text
                 theme_text_color: "Secondary"
+
     MDCard:
         size_hint_y: None
         height: dp(180)
         elevation: 4
         padding: dp(8)
+
         BoxLayout:
             orientation: "vertical"
+
             MDLabel:
                 text: "Recent Downloads"
                 font_style: "Subtitle1"
+
             ScrollView:
                 MDList:
                     id: recent_list
@@ -138,13 +190,18 @@ class AndroidSAF:
 class YouTubeDownloaderApp(MDApp):
     status_text = StringProperty("Ready")
     progress = NumericProperty(0)
-    download_folder = StringProperty("")   # **full path** shown in UI
+    download_folder = StringProperty("")   # full path shown in UI
     recent = ListProperty([])
 
     # Android only
-    _saf = None          # SAF instance when user picks a custom folder
-    _folder_uri = None   # persisted SAF URI string
-    _default_path = None # absolute path of the default internal folder
+    _saf = None
+    _folder_uri = None
+    _default_path = None
+
+    # Quality selector
+    _formats = []          # list of dicts: {"format_id":..., "text":...}
+    _selected_format = None
+    quality_menu = None
 
     DEFAULT_FOLDER_NAME = "YouTube Downloads"
 
@@ -154,35 +211,31 @@ class YouTubeDownloaderApp(MDApp):
         self.file_manager = None
         self.store = JsonStore("ytdl_store.json")
 
-        # Load recent list
+        # recent list
         if self.store.exists("recent"):
             self.recent = self.store.get("recent")["items"]
 
-        # Load persisted SAF folder (if any)
+        # persisted SAF folder
         if self.store.exists("folder_uri"):
             self._folder_uri = self.store.get("folder_uri")["uri"]
             self.download_folder = self.store.get("folder_uri")["name"]
 
-        # --------------------------------------------------------------
-        # 1. Android – internal shared storage default folder
-        # 2. Desktop – ~/YouTube Downloads
-        # --------------------------------------------------------------
+        # platform specific defaults
         if platform == 'android':
             self._setup_android_default()
-            if self._folder_uri:                     # user previously chose SAF
+            if self._folder_uri:
                 self._saf = AndroidSAF(self._folder_uri)
         else:
             self._setup_desktop_default()
 
     # ------------------------------------------------------------------
-    # Android – default folder in internal shared storage
+    # Android – default internal shared storage folder
     # ------------------------------------------------------------------
     def _setup_android_default(self):
-        # /storage/emulated/0/Download/YouTube Downloads
         base = "/storage/emulated/0/Download"
         self._default_path = os.path.join(base, self.DEFAULT_FOLDER_NAME)
         os.makedirs(self._default_path, exist_ok=True)
-        self.download_folder = self._default_path          # show full path
+        self.download_folder = self._default_path
 
     # ------------------------------------------------------------------
     # Desktop – ~/YouTube Downloads
@@ -191,40 +244,6 @@ class YouTubeDownloaderApp(MDApp):
         default_path = os.path.join(os.path.expanduser("~"), self.DEFAULT_FOLDER_NAME)
         os.makedirs(default_path, exist_ok=True)
         self.download_folder = default_path
-
-    # ------------------------------------------------------------------
-    # Android SAF picker result
-    # ------------------------------------------------------------------
-    def on_activity_result(self, request_code, result_code, intent):
-        if request_code != 1001:
-            return
-        if result_code != -1:   # RESULT_OK = -1
-            self._show_dialog("Folder selection cancelled.")
-            return
-        try:
-            from jnius import autoclass
-            Uri = autoclass('android.net.Uri')
-            DocumentFile = autoclass('android.provider.DocumentsContract$DocumentFile')
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-
-            uri = intent.getData()
-            cr = PythonActivity.mActivity.getContentResolver()
-            cr.takePersistableUriPermission(
-                uri,
-                autoclass('android.content.Intent').FLAG_GRANT_READ_URI_PERMISSION |
-                autoclass('android.content.Intent').FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-            doc_file = DocumentFile.fromTreeUri(PythonActivity.mActivity, uri)
-            name = doc_file.getName() or "Selected Folder"
-
-            self._folder_uri = uri.toString()
-            self.store.put("folder_uri", uri=self._folder_uri, name=name)
-            self.download_folder = name                     # SAF folder name (user sees it)
-            self.root.ids.folder_label.text = name
-            self._saf = AndroidSAF(self._folder_uri)
-            self._show_dialog(f"Folder selected: {name}")
-        except Exception as e:
-            self._show_dialog(f"Error: {str(e)}")
 
     # ------------------------------------------------------------------
     def build(self):
@@ -236,15 +255,12 @@ class YouTubeDownloaderApp(MDApp):
 
     def _post_build(self, dt):
         self._populate_recent()
-        # Ensure label shows the full path (default or persisted SAF name)
         self.root.ids.folder_label.text = self.download_folder
 
     # ------------------------------------------------------------------
     # UI helpers
     # ------------------------------------------------------------------
     def _populate_recent(self):
-        if not self.root or 'recent_list' not in self.root.ids:
-            return
         lst = self.root.ids.recent_list
         lst.clear_widgets()
         for item in reversed(self.recent[-10:]):
@@ -287,6 +303,33 @@ class YouTubeDownloaderApp(MDApp):
         except Exception as e:
             self._show_dialog(f"Error opening picker: {e}")
 
+    def on_activity_result(self, request_code, result_code, intent):
+        if request_code != 1001 or result_code != -1:
+            self._show_dialog("Folder selection cancelled.")
+            return
+        try:
+            from jnius import autoclass
+            Uri = autoclass('android.net.Uri')
+            DocumentFile = autoclass('android.provider.DocumentsContract$DocumentFile')
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            uri = intent.getData()
+            cr = PythonActivity.mActivity.getContentResolver()
+            cr.takePersistableUriPermission(
+                uri,
+                autoclass('android.content.Intent').FLAG_GRANT_READ_URI_PERMISSION |
+                autoclass('android.content.Intent').FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            doc_file = DocumentFile.fromTreeUri(PythonActivity.mActivity, uri)
+            name = doc_file.getName() or "Selected Folder"
+            self._folder_uri = uri.toString()
+            self.store.put("folder_uri", uri=self._folder_uri, name=name)
+            self.download_folder = name
+            self.root.ids.folder_label.text = name
+            self._saf = AndroidSAF(self._folder_uri)
+            self._show_dialog(f"Folder selected: {name}")
+        except Exception as e:
+            self._show_dialog(f"Error: {str(e)}")
+
     def _desktop_file_manager(self):
         if not self.file_manager:
             self.file_manager = MDFileManager(
@@ -310,6 +353,81 @@ class YouTubeDownloaderApp(MDApp):
         self.root.ids.url_field.text = ""
         self.progress = 0
         self.status_text = "Ready"
+        self._reset_quality_selector()
+
+    # ------------------------------------------------------------------
+    # ---------- MULTI‑QUALITY ----------
+    # ------------------------------------------------------------------
+    def load_formats(self):
+        url = self.root.ids.url_field.text.strip()
+        if not url:
+            self._show_dialog("Enter a YouTube URL first.")
+            return
+
+        self._set_status("Loading formats…")
+        threading.Thread(target=self._load_formats_thread, args=(url,), daemon=True).start()
+
+    def _load_formats_thread(self, raw_url: str):
+        url = fix_shorts_url(raw_url)
+        try:
+            ydl = yt_dlp.YoutubeDL({"quiet": True})
+            info = ydl.extract_info(url, download=False)
+            formats = info.get("formats", [])
+
+            # Build a nice list: resolution + codec + ext
+            self._formats = []
+            for f in formats:
+                if f.get("vcodec") == "none":      # skip audio‑only
+                    continue
+                height = f.get("height") or 0
+                ext = f.get("ext", "")
+                codec = f.get("vcodec", "").split(".")[0]
+                label = f"{height}p – {codec} – {ext}"
+                self._formats.append({"format_id": f["format_id"], "text": label})
+
+            # Sort by height descending
+            self._formats.sort(key=lambda x: int(x["text"].split("p")[0]), reverse=True)
+
+            Clock.schedule_once(self._show_quality_menu)
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._show_dialog(f"Error loading formats: {e}"))
+
+    @mainthread
+    def _show_quality_menu(self, dt):
+        if not self._formats:
+            self._show_dialog("No video formats found.")
+            self._set_status("Ready")
+            return
+
+        menu_items = [
+            {
+                "text": f["text"],
+                "viewclass": "OneLineListItem",
+                "on_release": lambda x=f["format_id"], y=f["text"]: self._select_quality(x, y),
+            }
+            for f in self._formats
+        ]
+
+        self.quality_menu = MDDropdownMenu(
+            caller=self.root.ids.quality_btn,
+            items=menu_items,
+            width_mult=4,
+        )
+        self.root.ids.quality_btn.disabled = False
+        self.root.ids.quality_btn.text = "Quality"
+        self._set_status("Formats loaded – choose quality")
+        self.quality_menu.open()
+
+    def _select_quality(self, fmt_id: str, text: str):
+        self._selected_format = fmt_id
+        self.root.ids.quality_btn.text = text.split(" – ")[0]  # show only resolution
+        self.quality_menu.dismiss()
+
+    def _reset_quality_selector(self):
+        self.root.ids.quality_btn.text = "Quality"
+        self.root.ids.quality_btn.disabled = True
+        self._selected_format = None
+        self._formats = []
 
     # ------------------------------------------------------------------
     # Download logic
@@ -318,10 +436,12 @@ class YouTubeDownloaderApp(MDApp):
         url = self.root.ids.url_field.text.strip()
         if not url:
             return self._show_dialog("Please paste a YouTube URL.")
-
-        # Android always has a writable location (default or SAF)
         if platform == 'android' and not (self._default_path or self._saf):
             return self._show_dialog("Folder error – restart the app.")
+
+        # Quality validation
+        if not self._selected_format:
+            return self._show_dialog("Please select a quality first.")
 
         threading.Thread(target=self._download_thread, args=(url,), daemon=True).start()
 
@@ -332,18 +452,16 @@ class YouTubeDownloaderApp(MDApp):
         url = fix_shorts_url(raw_url)
 
         ydl_opts = {
-            "format": "best[ext=mp4]/best",
+            "format": self._selected_format,
             "noplaylist": True,
             "progress_hooks": [self._progress_hook],
             "quiet": True,
             "no_warnings": True,
             "merge_output_format": "mp4",
-            "extractor_args": {"youtube": {"skip": ["dash"]}},
+            "outtmpl": "",  # will be set later
         }
 
-        # --------------------------------------------------------------
-        # Android – SAF folder selected?
-        # --------------------------------------------------------------
+        # ------------------- SAF folder -------------------
         if platform == 'android' and self._saf:
             info = yt_dlp.YoutubeDL({"quiet": True}).extract_info(url, download=False)
             title = info.get("title", "video")
@@ -384,13 +502,10 @@ class YouTubeDownloaderApp(MDApp):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-        else:   # Desktop OR Android default internal folder
-            if platform == 'android':
-                outtmpl = os.path.join(self._default_path, "%(title)s.%(ext)s")
-            else:
-                outtmpl = os.path.join(self.download_folder, "%(title)s.%(ext)s")
-            ydl_opts["outtmpl"] = outtmpl
-
+        # ------------------- Default folder -------------------
+        else:
+            out_path = self._default_path if platform == 'android' else self.download_folder
+            ydl_opts["outtmpl"] = os.path.join(out_path, "%(title)s.%(ext)s")
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -406,7 +521,7 @@ class YouTubeDownloaderApp(MDApp):
         self.progress = 100
 
     # ------------------------------------------------------------------
-    # Progress hook
+    # Progress hook – also updates percent label
     # ------------------------------------------------------------------
     def _progress_hook(self, d):
         if d["status"] == "downloading":
@@ -420,6 +535,7 @@ class YouTubeDownloaderApp(MDApp):
     @mainthread
     def _update_progress(self, val: int):
         self.progress = val
+        self.root.ids.percent_label.text = f"{val} %"
 
     @mainthread
     def _set_status(self, txt: str):
