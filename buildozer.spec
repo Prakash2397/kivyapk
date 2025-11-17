@@ -105,8 +105,9 @@ fullscreen = 0
 # (list) Permissions
 # (See https://python-for-android.readthedocs.io/en/latest/buildoptions.html for all the supported syntaxes and properties)
 #android.permissions = android.permission.INTERNET, (name=android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=18)
-#android.permissions = INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE
-android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE, ACCESS_NETWORK_STATE
+android.permissions = INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE
+
+android.use_androidx = True
 
 
 # (list) features (adds uses-feature -tags to manifest)
