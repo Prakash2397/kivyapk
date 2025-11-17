@@ -6,10 +6,10 @@
 [app]
 
 # (str) Title of your application
-title = firstapp
+title = youtubevideodownloader
 
 # (str) Package name
-package.name = social_test2
+package.name = youtubevideodownloader1
 
 
 # (str) Package domain (needed for android/ios packaging)
@@ -43,7 +43,7 @@ version = 0.1
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy==2.2.1, kivymd==1.2.0, pillow, android,openssl,sqlite3
+requirements = python3,kivy==2.2.1, kivymd==1.2.0, pillow, android,openssl,sqlite3, threading, os,datetime,ytdl,pytube
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
