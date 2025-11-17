@@ -6,7 +6,7 @@
 [app]
 
 # (str) Title of your application
-title = youtubevideodownloader
+title = multiyoutube
 
 # (str) Package name
 package.name = youtubevideodownloader1
