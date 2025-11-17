@@ -359,31 +359,47 @@ class YouTubeDownloaderApp(MDApp):
 
     @mainthread
     def _show_quality_menu(self, dt):
+        
         if not self._formats:
             self._show_dialog("No video formats found")
             self._set_status("Ready")
             return
-
+        
+        if self.quality_menu:
+            self.quality_menu.dismiss()
+        
         menu_items = [
-            {
-                "text": f["text"],
-                "viewclass": "OneLineListItem",
-                "height": dp(56),
-                "on_release": lambda x=f["format_id"], y=f["text"]: self._select_quality(x, y),
-            }
-            for f in self._formats
+        {
+            "text": f["text"],
+            "viewclass": "OneLineListItem",
+            "height": dp(56),
+            "on_release": lambda x=f["format_id"], y=f["text"]: self._select_quality(x, y),
+        }
+        for f in self._formats
         ]
-
+        
         self.quality_menu = MDDropdownMenu(
-            caller=self.root.ids.quality_btn,
-            items=menu_items,
-            width_mult=4,
+        caller=self.root.ids.quality_btn,
+        items=menu_items,
+        width_mult=4,
+        max_height=dp(400),
         )
+        
         self.root.ids.quality_btn.disabled = False
-        self.root.ids.quality_btn.text = f"{len(self._formats)} qualities"
-        self._set_status("Select quality")
-        # Open immediately after creation – works reliably on Android
-        Clock.schedule_once(lambda dt: self.quality_menu.open(), 0.1)
+        self.root.ids.quality_btn.text = f"{len(self._formats)} qualities ↓"
+        self._set_status("Tap Quality button ↓")
+        
+        def try_open(dt):
+            btn = self.root.ids.quality_btn
+            if btn.get_parent_window() and btn.collide_point(*btn.center):
+                try:
+                    self.quality_menu.open()
+                except:
+                    Clock.schedule_once(try_open, 0.2)
+            else:
+                Clock.schedule_once(try_open, 0.2)
+            
+            Clock.schedule_once(try_open, 0.3)
 
     def _select_quality(self, fmt_id, text):
         self._selected_format = fmt_id
@@ -508,3 +524,4 @@ class YouTubeDownloaderApp(MDApp):
 
 if __name__ == '__main__':
     YouTubeDownloaderApp().run()
+
