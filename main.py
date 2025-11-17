@@ -5,7 +5,7 @@ KivyMD YouTube Downloader – Android (internal shared storage) + Desktop – No
 Features:
  • Default folder: /storage/emulated/0/Download/YouTube Downloads
  • Full path shown in label
- • Multi‑quality selector (dropdown)
+ • Multi‑quality selector (dropdown) – **FIXED**
  • Progress bar with percentage text
 """
 import os
@@ -87,7 +87,7 @@ BoxLayout:
                     id: quality_btn
                     text: "Quality"
                     disabled: True
-                    on_release: app.quality_menu.open()
+                    on_release: app.quality_menu.open() if app.quality_menu else None
 
                 MDRaisedButton:
                     text: "Download"
@@ -201,7 +201,7 @@ class YouTubeDownloaderApp(MDApp):
     # Quality selector
     _formats = []          # list of dicts: {"format_id":..., "text":...}
     _selected_format = None
-    quality_menu = None
+    quality_menu = None    # <-- will be created once after formats are loaded
 
     DEFAULT_FOLDER_NAME = "YouTube Downloads"
 
@@ -363,7 +363,6 @@ class YouTubeDownloaderApp(MDApp):
         if not url:
             self._show_dialog("Enter a YouTube URL first.")
             return
-
         self._set_status("Loading formats…")
         threading.Thread(target=self._load_formats_thread, args=(url,), daemon=True).start()
 
@@ -374,7 +373,6 @@ class YouTubeDownloaderApp(MDApp):
             info = ydl.extract_info(url, download=False)
             formats = info.get("formats", [])
 
-            # Build a nice list: resolution + codec + ext
             self._formats = []
             for f in formats:
                 if f.get("vcodec") == "none":      # skip audio‑only
@@ -388,12 +386,12 @@ class YouTubeDownloaderApp(MDApp):
             # Sort by height descending
             self._formats.sort(key=lambda x: int(x["text"].split("p")[0]), reverse=True)
 
-            Clock.schedule_once(self._show_quality_menu)
+            Clock.schedule_once(self._build_quality_menu)
         except Exception as e:
             Clock.schedule_once(lambda dt: self._show_dialog(f"Error loading formats: {e}"))
 
     @mainthread
-    def _show_quality_menu(self, dt):
+    def _build_quality_menu(self, dt):
         if not self._formats:
             self._show_dialog("No video formats found.")
             self._set_status("Ready")
@@ -408,11 +406,14 @@ class YouTubeDownloaderApp(MDApp):
             for f in self._formats
         ]
 
+        # *** CREATE MENU ONCE ***
         self.quality_menu = MDDropdownMenu(
             caller=self.root.ids.quality_btn,
             items=menu_items,
             width_mult=4,
         )
+
+        # enable button + open menu immediately
         self.root.ids.quality_btn.disabled = False
         self.root.ids.quality_btn.text = "Quality"
         self._set_status("Formats loaded – choose quality")
@@ -420,7 +421,7 @@ class YouTubeDownloaderApp(MDApp):
 
     def _select_quality(self, fmt_id: str, text: str):
         self._selected_format = fmt_id
-        self.root.ids.quality_btn.text = text.split(" – ")[0]  # show only resolution
+        self.root.ids.quality_btn.text = text.split(" – ")[0]   # show only resolution
         self.quality_menu.dismiss()
 
     def _reset_quality_selector(self):
@@ -428,6 +429,7 @@ class YouTubeDownloaderApp(MDApp):
         self.root.ids.quality_btn.disabled = True
         self._selected_format = None
         self._formats = []
+        self.quality_menu = None
 
     # ------------------------------------------------------------------
     # Download logic
@@ -438,11 +440,8 @@ class YouTubeDownloaderApp(MDApp):
             return self._show_dialog("Please paste a YouTube URL.")
         if platform == 'android' and not (self._default_path or self._saf):
             return self._show_dialog("Folder error – restart the app.")
-
-        # Quality validation
         if not self._selected_format:
             return self._show_dialog("Please select a quality first.")
-
         threading.Thread(target=self._download_thread, args=(url,), daemon=True).start()
 
     # ------------------------------------------------------------------
