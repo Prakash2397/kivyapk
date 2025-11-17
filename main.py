@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-KivyMD YouTube Downloader – Android + Desktop – Nov 2025
+KivyMD YouTube Downloader – Android (internal storage) + Desktop – Nov 2025
 Single file, default folder = “YouTube Downloads”
 """
 import os
@@ -142,14 +142,13 @@ class YouTubeDownloaderApp(MDApp):
     recent = ListProperty([])
 
     # Android only
-    _saf = None          # AndroidSAF instance
-    _folder_uri = None   # persisted URI string
+    _saf = None          # AndroidSAF instance (when user picks a SAF folder)
+    _folder_uri = None   # persisted SAF URI string
+    _default_path = None # absolute path of the internal default folder
 
-    # ------------------------------------------------------------------
-    # Default folder name
-    # ------------------------------------------------------------------
     DEFAULT_FOLDER_NAME = "YouTube Downloads"
 
+    # ------------------------------------------------------------------
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.file_manager = None
@@ -159,43 +158,49 @@ class YouTubeDownloaderApp(MDApp):
         if self.store.exists("recent"):
             self.recent = self.store.get("recent")["items"]
 
-        # Load persisted folder (if any)
+        # Load persisted SAF folder (if any)
         if self.store.exists("folder_uri"):
             self._folder_uri = self.store.get("folder_uri")["uri"]
             self.download_folder = self.store.get("folder_uri")["name"]
 
         # --------------------------------------------------------------
-        # 1. If we have a persisted SAF folder → use it (Android)
-        # 2. Else create the default folder automatically
+        # 1. Android – create/use internal default folder
+        # 2. Desktop – create ~/YouTube Downloads
         # --------------------------------------------------------------
-        if platform == 'android' and self._folder_uri:
-            self._saf = AndroidSAF(self._folder_uri)
-
-        elif not self.download_folder:
-            self._set_default_folder()
-
-    # ------------------------------------------------------------------
-    # Set (and create) the default folder
-    # ------------------------------------------------------------------
-    def _set_default_folder(self):
         if platform == 'android':
-            # On Android we **cannot** create a folder without user consent.
-            # We simply leave it empty and force the user to pick one.
-            self.download_folder = ""
+            self._setup_android_default()
+            if self._folder_uri:                     # user previously chose SAF
+                self._saf = AndroidSAF(self._folder_uri)
         else:
-            # Desktop – create ~/YouTube Downloads
-            default_path = os.path.join(os.path.expanduser("~"), self.DEFAULT_FOLDER_NAME)
-            os.makedirs(default_path, exist_ok=True)
-            self.download_folder = default_path
-            self.root.ids.folder_label.text = default_path
+            self._setup_desktop_default()
 
     # ------------------------------------------------------------------
-    # Android activity result (folder picker)
+    # Android – internal storage default folder
+    # ------------------------------------------------------------------
+    def _setup_android_default(self):
+        from jnius import autoclass
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        ctx = PythonActivity.mActivity
+        files_dir = ctx.getExternalFilesDir(None).getAbsolutePath()
+        self._default_path = os.path.join(files_dir, self.DEFAULT_FOLDER_NAME)
+        os.makedirs(self._default_path, exist_ok=True)
+        self.download_folder = self.DEFAULT_FOLDER_NAME   # shown to user
+
+    # ------------------------------------------------------------------
+    # Desktop – ~/YouTube Downloads
+    # ------------------------------------------------------------------
+    def _setup_desktop_default(self):
+        default_path = os.path.join(os.path.expanduser("~"), self.DEFAULT_FOLDER_NAME)
+        os.makedirs(default_path, exist_ok=True)
+        self.download_folder = default_path
+
+    # ------------------------------------------------------------------
+    # Android SAF folder picker result
     # ------------------------------------------------------------------
     def on_activity_result(self, request_code, result_code, intent):
         if request_code != 1001:
             return
-        if result_code != -1:                     # RESULT_OK = -1
+        if result_code != -1:   # RESULT_OK = -1
             self._show_dialog("Folder selection cancelled.")
             return
         try:
@@ -233,9 +238,7 @@ class YouTubeDownloaderApp(MDApp):
 
     def _post_build(self, dt):
         self._populate_recent()
-        # Show the default folder (desktop) or persisted one (Android)
-        if self.download_folder:
-            self.root.ids.folder_label.text = self.download_folder
+        self.root.ids.folder_label.text = self.download_folder
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -249,7 +252,7 @@ class YouTubeDownloaderApp(MDApp):
             lst.add_widget(OneLineListItem(text=f"{item['title']} — {item['time']}"))
 
     # ------------------------------------------------------------------
-    # Folder picker – Android uses SAF, desktop uses MDFileManager
+    # Folder picker – Android SAF or Desktop MDFileManager
     # ------------------------------------------------------------------
     def open_file_manager(self):
         if platform == 'android':
@@ -258,12 +261,9 @@ class YouTubeDownloaderApp(MDApp):
             self._desktop_file_manager()
 
     def _android_folder_picker(self):
-        if platform != 'android':
-            return
         try:
             from jnius import autoclass
             from android.runnable import run_on_ui_thread
-
             Intent = autoclass('android.content.Intent')
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             app = self
@@ -278,16 +278,13 @@ class YouTubeDownloaderApp(MDApp):
                 )
                 activity = PythonActivity.mActivity
                 activity.startActivityForResult(intent, 1001)
-
+                # set a single listener (idempotent)
                 if not hasattr(activity, 'ytdl_result_listener_set'):
                     activity.ytdl_result_listener_set = True
-
                     def result_handler(req_code, res_code, data):
                         if req_code == 1001:
                             app.on_activity_result(req_code, res_code, data)
-
                     activity.setResultListener(result_handler)
-
             start_picker()
         except Exception as e:
             self._show_dialog(f"Error opening picker: {e}")
@@ -323,12 +320,16 @@ class YouTubeDownloaderApp(MDApp):
         url = self.root.ids.url_field.text.strip()
         if not url:
             return self._show_dialog("Please paste a YouTube URL.")
-        if platform == 'android' and not self._saf:
-            return self._show_dialog("Please choose a folder first.")
-        if platform != 'android' and not self.download_folder:
-            return self._show_dialog("Please choose a folder first.")
+
+        # On Android we *always* have a writable location:
+        #   - default internal folder OR
+        #   - SAF folder chosen by user
+        if platform == 'android' and not (self._default_path or self._saf):
+            return self._show_dialog("Folder error – please restart the app.")
+
         threading.Thread(target=self._download_thread, args=(url,), daemon=True).start()
 
+    # ------------------------------------------------------------------
     def _download_thread(self, raw_url: str):
         self.progress = 0
         self._set_status("Preparing…")
@@ -344,17 +345,18 @@ class YouTubeDownloaderApp(MDApp):
             "extractor_args": {"youtube": {"skip": ["dash"]}},
         }
 
-        if platform == 'android':
-            # ---- Android: SAF -------------------------------------------------
+        # ------------------------------------------------------------------
+        # Android – decide between default internal folder and SAF folder
+        # ------------------------------------------------------------------
+        if platform == 'android' and self._saf:          # SAF folder selected
             info = yt_dlp.YoutubeDL({"quiet": True}).extract_info(url, download=False)
             title = info.get("title", "video")
             ext = info.get("ext", "mp4")
             safe_name = "".join(c if c not in r'\/:*?"<>|' else "_" for c in title)
             filename = f"{safe_name}.{ext}"
-
             file_uri = self._saf.create_file(filename)
             if not file_uri:
-                self._set_status("Failed to create file in folder")
+                self._set_status("Failed to create file in SAF folder")
                 return
 
             class SAFOutput:
@@ -386,10 +388,13 @@ class YouTubeDownloaderApp(MDApp):
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-        else:
-            # ---- Desktop ----------------------------------------------------
-            outtmpl = os.path.join(self.download_folder, "%(title)s.%(ext)s")
+        else:                                            # Desktop OR Android default internal folder
+            if platform == 'android':
+                outtmpl = os.path.join(self._default_path, "%(title)s.%(ext)s")
+            else:
+                outtmpl = os.path.join(self.download_folder, "%(title)s.%(ext)s")
             ydl_opts["outtmpl"] = outtmpl
+
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
